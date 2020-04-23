@@ -85,9 +85,6 @@ class ChildType(graphene.ObjectType, FakeModelFields):
     parent = graphene.Field(ParentType)
     siblings = graphene.List(lambda: ChildType)
 
-    create_parent = graphene.Field(ParentType, data=graphene.Argument(ParentInput))
-    create_sibling = graphene.Field(ParentType, data=graphene.Argument(lambda: ChildInput))
-
     @staticmethod
     def resolve_parent(root: Child, __: graphene.ResolveInfo):
         return FakeParentDB.get(root.parent)
@@ -95,19 +92,6 @@ class ChildType(graphene.ObjectType, FakeModelFields):
     @staticmethod
     def resolve_siblings(root: Child, __: graphene.ResolveInfo):
         return [FakeChildDB[pk] for pk in root.siblings]
-
-    @staticmethod
-    def resolve_create_parent(child: Child, __: graphene.ResolveInfo, data: ParentInput):
-        parent = UpsertParent.mutate(None, __, data)
-        child.parent = parent.pk
-        return parent
-
-    @staticmethod
-    def resolve_create_sibling(node1: Child, __: graphene.ResolveInfo, data: 'ChildInput'):
-        node2 = UpsertChild.mutate(None, __, data)
-        node1.siblings.append(node2.pk)
-        node2.siblings.append(node1.pk)
-        return node2
 
 
 class ChildInput(graphene.InputObjectType, FakeModelFields):  # notice the difference of fields with ChildType
@@ -139,6 +123,9 @@ class UpsertChild(graphene.Mutation, ChildType):
     class Arguments:
         data = ChildInput()
 
+    create_parent = graphene.Field(ParentType, data=graphene.Argument(ParentInput))
+    create_sibling = graphene.Field(ParentType, data=graphene.Argument(lambda: ChildInput))
+
     @staticmethod
     def mutate(_: None, __: graphene.ResolveInfo, data: ChildInput):
         instance = FakeChildDB.get(data.pk)
@@ -153,6 +140,19 @@ class UpsertChild(graphene.Mutation, ChildType):
         )
         FakeChildDB[data.pk] = child
         return child
+
+    @staticmethod
+    def resolve_create_parent(child: Child, __: graphene.ResolveInfo, data: ParentInput):
+        parent = UpsertParent.mutate(None, __, data)
+        child.parent = parent.pk
+        return parent
+
+    @staticmethod
+    def resolve_create_sibling(node1: Child, __: graphene.ResolveInfo, data: 'ChildInput'):
+        node2 = UpsertChild.mutate(None, __, data)
+        node1.siblings.append(node2.pk)
+        node2.siblings.append(node1.pk)
+        return node2
 
 
 #######################################
