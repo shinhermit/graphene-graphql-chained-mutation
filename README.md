@@ -130,3 +130,60 @@ And that's basically it (the rest is common Graphene boilerplate and test mocks)
 
 The issue with this is that the edge-like mutation arguments do not satisfy the _type awareness_ that GraphQL promotes: in the GraphQL spirit, `node1` and `node2` should be typed `graphene.Field(ChildType)`, instead of `graphene.String()` as in this implementation.
 
+## Nested sibling creation
+
+For comparison, I also implemented a nesting pattern where only creations are resolved (it the only case where we cannot have the data in previous query), [one-file program available on Github](https://github.com/shinhermit/graphene-graphql-chained-mutation/blob/master/nested_creation_mutation.py).
+
+It is classic Graphene, except for the mutation `UpsertChild` were we add field to solve nested creations *and* their resolvers:
+
+```python
+class UpsertChild(graphene.Mutation, ChildType):
+    class Arguments:
+        data = ChildInput()
+
+    create_parent = graphene.Field(ParentType, data=graphene.Argument(ParentInput))
+    create_sibling = graphene.Field(ParentType, data=graphene.Argument(lambda: ChildInput))
+
+    @staticmethod
+    def mutate(_: None, __: graphene.ResolveInfo, data: ChildInput):
+        return Child(
+            pk=data.pk
+            ,name=data.name
+            ,parent=FakeParentDB.get(data.parent)
+            ,siblings=[FakeChildDB[pk] for pk in data.siblings or []]
+        )  # <-- example
+
+    @staticmethod
+    def resolve_create_parent(child: Child, __: graphene.ResolveInfo, data: ParentInput):
+        parent = UpsertParent.mutate(None, __, data)
+        child.parent = parent.pk
+        return parent
+
+    @staticmethod
+    def resolve_create_sibling(node1: Child, __: graphene.ResolveInfo, data: 'ChildInput'):
+        node2 = UpsertChild.mutate(None, __, data)
+        node1.siblings.append(node2.pk)
+        node2.siblings.append(node1.pk)
+        return node2
+```
+
+So the quantity of extra _stuff_ is small compared to to the node+edge pattern. We can now execute a query like:
+
+```graphql
+mutation ($parent: ParentInput, $child1: ChildInput, $child2: ChildInput) {
+    n1: upsertChild(data: $child1) {
+        pk
+        name
+        siblings { pk name }
+        
+        parent: createParent(data: $parent) { pk name }
+        
+        newSibling: createSibling(data: $child2) { pk name }
+    }
+}
+```
+
+However, we can see that, in contrast to what was possible with the node+edge pattern,(shared_result_mutation.py) we cannot set the parent of the new sibling in the same mutation. The obvious reason is that we don't have its data (its pk in particular). The other reason is because order is not guaranteed for nested mutations. So cannot create, for example, a data-less mutation `assignParentToSiblings` that would set the parent of all siblings of the current *root* child, because the nested sibling may be created before the nested parent.
+
+In some practical cases though, we just need to create a new object and
+and then link it to an exiting object. Nesting can satisfy these use cases.
