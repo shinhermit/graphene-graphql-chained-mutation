@@ -73,6 +73,14 @@ class ChildType(graphene.ObjectType, FakeModelFields):
     parent = graphene.Field(ParentType)
     siblings = graphene.List(lambda: ChildType)
 
+    @staticmethod
+    def resolve_parent(root: Child, __: graphene.ResolveInfo):
+        return FakeParentDB[root.parent]
+
+    @staticmethod
+    def resolve_siblings(root: Child, __: graphene.ResolveInfo):
+        return [FakeChildDB[pk] for pk in root.siblings]
+
 
 class ChildInput(graphene.InputObjectType, FakeModelFields):  # notice the difference of fields with ChildType
     parent = graphene.Int()
@@ -155,7 +163,7 @@ class SetParent(SharedResultMutation):
         child_ : ChildType = shared_results.get(child)
         assert parent_ is not None
         assert child_ is not None
-        FakeChildDB[child_.pk].parent = FakeParentDB[parent_.pk]
+        FakeChildDB[child_.pk].parent = parent_.pk
         return SetParent(ok=True)
 
 
@@ -172,8 +180,8 @@ class AddSibling(SharedResultMutation):
         node2_ : ChildType = shared_results.get(node2)
         assert node1_ is not None
         assert node2_ is not None
-        FakeChildDB[node1_.pk].siblings.append(FakeChildDB[node2_.pk])
-        FakeChildDB[node2_.pk].siblings.append(FakeChildDB[node1_.pk])
+        FakeChildDB[node1_.pk].siblings.append(node2_.pk)
+        FakeChildDB[node2_.pk].siblings.append(node1_.pk)
         return AddSibling(ok=True)
 
 
