@@ -1,3 +1,17 @@
+"""
+This a self-contained module to test the idea of chaining GraphQL mutations
+based on a Graph node+edge creation pattern, inspired by what is done with 
+Graphviz Dot for example.
+
+Graphene required:
+
+> pip install graphene
+
+
+Run with:
+
+> python shared_result_mutation.py
+"""
 import json
 from typing import List, Dict
 import graphene
