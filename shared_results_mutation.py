@@ -1,6 +1,6 @@
 """
 This a self-contained module to test the idea of chaining GraphQL mutations
-based on a Graph node+edge creation pattern, inspired by what is done with 
+based on a Graph node+edge creation pattern, inspired by what is done with
 Graphviz Dot for example.
 
 Graphene required:
@@ -11,6 +11,12 @@ Graphene required:
 Run with:
 
 > python shared_result_mutation.py
+
+The principle is to use a Graphene middleware (ShareResultMiddleware)
+to inject a result holder in the resolvers and then use these results
+to allow referencing a mutation result in another mutataion result of
+the same query. See the test section below for an example of the type
+of queries we want to resolve.
 """
 import json
 from typing import List, Dict
