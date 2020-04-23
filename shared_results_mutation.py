@@ -75,7 +75,7 @@ class ChildType(graphene.ObjectType, FakeModelFields):
 
     @staticmethod
     def resolve_parent(root: Child, __: graphene.ResolveInfo):
-        return FakeParentDB[root.parent]
+        return FakeParentDB.get(root.parent)
 
     @staticmethod
     def resolve_siblings(root: Child, __: graphene.ResolveInfo):
