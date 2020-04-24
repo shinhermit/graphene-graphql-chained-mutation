@@ -89,7 +89,7 @@ class ChildInput(graphene.InputObjectType, FakeModelFields):  # notice the diffe
 
 
 #######################################
-# New Sharing result assets
+# Sharing result features
 #######################################
 
 
