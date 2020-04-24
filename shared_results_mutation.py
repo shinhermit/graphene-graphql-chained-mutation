@@ -19,8 +19,9 @@ the same query. See the test section below for an example of the type
 of queries we want to resolve.
 """
 import json
-from typing import List, Dict
+from typing import List, Dict, Tuple, Type
 import graphene
+from graphene import ObjectType
 
 # Fake models
 
@@ -88,7 +89,7 @@ class ChildInput(graphene.InputObjectType, FakeModelFields):  # notice the diffe
 
 
 #######################################
-# GraphQL mutations
+# New Sharing result assets
 #######################################
 
 
@@ -103,7 +104,8 @@ class ShareResultMiddleware:
 class SharedResultMutation(graphene.Mutation):
 
     @classmethod
-    def mutate(cls, root: None, info: graphene.ResolveInfo, shared_results: dict, *args, **kwargs):
+    def mutate(cls, root: None, info: graphene.ResolveInfo,
+               shared_results: Dict[str, ObjectType], *args, **kwargs):
         result = cls.mutate_and_share_result(root, info, *args, **kwargs)
         if root is None:
             node = info.path[0]
@@ -111,8 +113,84 @@ class SharedResultMutation(graphene.Mutation):
         return result
 
     @staticmethod
-    def mutate_and_share_result(*_, **__):
-        return SharedResultMutation()  # override
+    def mutate_and_share_result(root: None, info: graphene.ResolveInfo, *_, **__):
+        pass  # override me
+
+
+class EdgeMutationBase(SharedResultMutation):
+
+    ok = graphene.Boolean()
+
+    @classmethod
+    def set_link(cls, node1: ObjectType, node2: ObjectType):
+        pass  # override me
+
+
+def assert_input_node_types(shared_results: dict, node1: str, node2: str,
+                            node1_type: Type[ObjectType],
+                            node2_type: Type[ObjectType]) -> Tuple[ObjectType, ObjectType]:
+    node1_ = shared_results.get(node1)
+    node2_ = shared_results.get(node2)
+    assert node1_ is not None, "Node 1 not found in mutation results."
+    assert node2_ is not None, "Node 1 not found in mutation results."
+    assert node1_type is not None, "A type must be specified for Node 1."
+    assert node2_type is not None, "A type must be specified for Node 2."
+    assert isinstance(node1_, node1_type), "%s is not instance of %s" % \
+                                           (type(node1_), node1_type.__name__)
+    assert isinstance(node2_, node2_type), "%s is not instance of %s" % \
+                                           (type(node2_), node2_type.__name__)
+    return node1_, node2_
+
+
+class ParentChildEdgeMutation(EdgeMutationBase):
+
+    parent_type: Type[ObjectType] = None
+    child_type: Type[ObjectType] = None
+
+    class Arguments:
+        parent = graphene.String(required=True)
+        child = graphene.String(required=True)
+
+    @classmethod
+    def mutate(cls, root: None, info: graphene.ResolveInfo,
+               shared_results: dict, *_, parent: str="", child: str="", **__):
+        parent_, child_ = assert_input_node_types(
+            shared_results,
+            node1=parent,
+            node2=child,
+            node1_type=cls.parent_type,
+            node2_type=cls.child_type
+        )
+        cls.set_link(parent_, child_)
+        return SetParent(ok=True)
+
+
+class SiblingEdgeMutation(EdgeMutationBase):
+
+    node1_type: Type[ObjectType] = None
+    node2_type: Type[ObjectType] = None
+
+    class Arguments:
+        node1 = graphene.String(required=True)
+        node2 = graphene.String(required=True)
+
+    @classmethod
+    def mutate(cls, root: None, info: graphene.ResolveInfo,
+               shared_results: dict, *_, node1: str="", node2: str="", **__):
+        node1_, node2_ = assert_input_node_types(
+            shared_results,
+            node1=node1,
+            node2=node2,
+            node1_type=cls.node1_type,
+            node2_type=cls.node2_type
+        )
+        cls.set_link(node1_, node2_)
+        return SetParent(ok=True)
+
+
+#######################################
+# GraphQL mutations
+#######################################
 
 
 class UpsertParent(SharedResultMutation, ParentType):
@@ -120,7 +198,7 @@ class UpsertParent(SharedResultMutation, ParentType):
         data = ParentInput()
 
     @staticmethod
-    def mutate_and_share_result(root: None, info: graphene.ResolveInfo, data: ParentInput, *___, **____):
+    def mutate_and_share_result(root: None, info: graphene.ResolveInfo, data: ParentInput, *_, **__):
         instance = FakeParentDB.get(data.pk)
         if instance is None:
             Counters.PARENT_COUNTER += 1
@@ -135,7 +213,7 @@ class UpsertChild(SharedResultMutation, ChildType):
         data = ChildInput()
 
     @staticmethod
-    def mutate_and_share_result(root: None, info: graphene.ResolveInfo, data: ChildInput):
+    def mutate_and_share_result(root: None, info: graphene.ResolveInfo, data: ChildInput, *_, **__):
         instance = FakeChildDB.get(data.pk)
         if instance is None:
             Counters.CHILD_COUNTER += 1
@@ -150,39 +228,27 @@ class UpsertChild(SharedResultMutation, ChildType):
         return child
 
 
-class SetParent(SharedResultMutation):
-    class Arguments:
-        parent = graphene.String(required=True)
-        child = graphene.String(required=True)
+class SetParent(ParentChildEdgeMutation):
+    """Set a FK like relation between between Parent and Child"""
 
-    ok = graphene.Boolean()
+    parent_type = Parent
+    child_type = Child
 
-    @staticmethod
-    def mutate(root: None, info: graphene.ResolveInfo, shared_results: dict, parent: str, child: str):
-        parent_: ParentType = shared_results.get(parent)
-        child_ : ChildType = shared_results.get(child)
-        assert parent_ is not None
-        assert child_ is not None
-        FakeChildDB[child_.pk].parent = parent_.pk
-        return SetParent(ok=True)
+    @classmethod
+    def set_link(cls, parent: ParentType, child: ChildType):
+        FakeChildDB[child.pk].parent = parent.pk
 
 
-class AddSibling(SharedResultMutation):
-    class Arguments:
-        node1 = graphene.String(required=True)
-        node2 = graphene.String(required=True)
+class AddSibling(SiblingEdgeMutation):
+    """Set a m2m like relation between between Parent and Child"""
 
-    ok = graphene.Boolean()
+    node1_type = Child
+    node2_type = Child
 
-    @staticmethod
-    def mutate(root: None, info: graphene.ResolveInfo, shared_results: dict, node1: str, node2: str):  # TODO: this breaks type awareness
-        node1_ : ChildType = shared_results.get(node1)
-        node2_ : ChildType = shared_results.get(node2)
-        assert node1_ is not None
-        assert node2_ is not None
-        FakeChildDB[node1_.pk].siblings.append(node2_.pk)
-        FakeChildDB[node2_.pk].siblings.append(node1_.pk)
-        return AddSibling(ok=True)
+    @classmethod
+    def set_link(cls, node1: ChildType, node2: ChildType):
+        FakeChildDB[node1.pk].siblings.append(node2.pk)
+        FakeChildDB[node2.pk].siblings.append(node1.pk)
 
 
 #######################################
